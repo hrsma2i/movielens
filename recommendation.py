@@ -69,6 +69,49 @@ def SVD(R, n_epochs=20, K=100, lr=0.005, reg=0.02):
 # In[ ]:
 
 
+def SVD_batch(R, n_epochs=1000, K=100, lr=0.5, reg=0.02):
+    # U: the number of users
+    # I: the number of items
+    U, I = R.shape
+    # P: user factor matrix
+    P = np.random.rand(K, U)
+    # Q: item factor matrix
+    Q = np.random.rand(K, I)
+    
+    # only use rated elements of R to compute loss
+    mask = np.ones(R.shape)
+    mask[R == 0] = 0
+    
+    # learning
+    for epoch in trange(n_epochs, desc='epoch'):
+        for u in trange(U):
+            Pu = P[:,u] # (K, 1)
+            Eu = R[u,:] - Pu.T.dot(Q)*mask[u,:] # (1, I)
+            # (K, 1)
+            P[:,u] += lr*(np.mean(Eu*Q, axis=1)
+                          - reg*Pu)
+            
+        for i in trange(I):
+            Qi = Q[:,i] # (K, 1)
+            Ei = R[:,i] - P.T.dot(Qi)*mask[:,i] # (U, 1)
+            # (K, 1)
+            Q[:,i] += lr*(np.mean(Ei.T*P, axis=1)
+                          - reg*Qi)
+                    
+        # compute & print loss
+        E = R - (P.T.dot(Q))*mask
+        loss = rms(E) + reg/2.0*(rms(P)+rms(Q))
+        tqdm.write('epoch {}: {}'.format(epoch, loss))
+        
+        if loss < 0.23:
+            break
+            
+    return P, Q
+
+
+# In[ ]:
+
+
 def validation():
     # load learned factors
     U = np.loadtxt('others/U.csv')
@@ -123,7 +166,8 @@ def main(fold_id=1):
             
     # learning
     R = ratings.values
-    U, I = SVD(R)
+    U, I = SVD_batch(R)
+    #U, I = SVD(R)
     
     # save matrices
     np.savetxt('others/U.csv', U)
