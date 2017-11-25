@@ -26,7 +26,7 @@ def rms(arr):
 # In[ ]:
 
 
-def SVD(R, n_epochs=20, K=100, lr=0.005, reg=0.02):
+def SVD(R, n_epochs=20, K=100, lr=0.05, reg=0.02):
     # U: the number of users
     # I: the number of items
     U, I = R.shape
@@ -69,7 +69,8 @@ def SVD(R, n_epochs=20, K=100, lr=0.005, reg=0.02):
 # In[ ]:
 
 
-def SVD_batch(R, n_epochs=1000, K=100, lr=0.5, reg=0.02):
+def SVD_batch(R, n_epochs=100, K=100, lr=0.005, reg=0.02,
+             threshold=0.01):
     # U: the number of users
     # I: the number of items
     U, I = R.shape
@@ -77,71 +78,86 @@ def SVD_batch(R, n_epochs=1000, K=100, lr=0.5, reg=0.02):
     P = np.random.rand(K, U)
     # Q: item factor matrix
     Q = np.random.rand(K, I)
+    bU = np.zeros(U)
+    bI = np.zeros(I)
     
     # only use rated elements of R to compute loss
     mask = np.ones(R.shape)
     mask[R == 0] = 0
     
+    pre_loss = None
+    chance = 2
+    
+    vld = Validater()
     # learning
     for epoch in trange(n_epochs, desc='epoch'):
         for u in trange(U):
             Pu = P[:,u] # (K, 1)
-            Eu = R[u,:] - Pu.T.dot(Q)*mask[u,:] # (1, I)
+            # (1, I)
+            Eu = (R[u,:] -Pu.T.dot(Q)
+                  -bU[u] -bI)*mask[u,:] 
             # (K, 1)
             P[:,u] += lr*(np.mean(Eu*Q, axis=1)
                           - reg*Pu)
+            bI += lr*(Eu.ravel() - reg*bI)
             
         for i in trange(I):
             Qi = Q[:,i] # (K, 1)
-            Ei = R[:,i] - P.T.dot(Qi)*mask[:,i] # (U, 1)
+            # (U, 1)
+            Ei = (R[:,i] -P.T.dot(Qi)
+                 -bU -bI[i])*mask[:,i]
             # (K, 1)
             Q[:,i] += lr*(np.mean(Ei.T*P, axis=1)
                           - reg*Qi)
+            bU += lr*(Ei.ravel() - reg*bU)
                     
         # compute & print loss
-        E = R - (P.T.dot(Q))*mask
-        loss = rms(E) + reg/2.0*(rms(P)+rms(Q))
-        tqdm.write('epoch {}: {}'.format(epoch, loss))
+        E = (R - P.T.dot(Q)
+             -bU.reshape(-1,1) -bI.reshape(1,-1))*mask
+        loss = rms(E)# + reg/2.0*(rms(P)+rms(Q))
+        tqdm.write('epoch {}'.format(epoch))
+        tqdm.write(' train loss:{}'.format(loss))
+        tqdm.write(' val loss:'+str(vld.validate(P, Q, bU, bI)))
         
-        if loss < 0.23:
+        #if pre_loss is not None and pre_loss < loss:
+        #    chance -= 1
+        #    if chance < 0:
+        #        break
+        
+        if loss < threshold:
             break
-            
-    return P, Q
+        
+        pre_loss = deepcopy(loss)
+        
+    return P, Q, bU, bI
 
 
 # In[ ]:
 
 
-def validation():
-    # load learned factors
-    U = np.loadtxt('others/U.csv')
-    I = np.loadtxt('others/I.csv')
-    
-    # predicted rating matrix
-    R_p = U.T.dot(I)
+class Validater:
 
     # load test data
     test_file = './data/u1.test'
     df_test = pd.read_csv(test_file, delimiter='\t', header=None)
     df_test.columns = ['user_id', 'item_id', 'rating', 'timestamp']
-
-    # get observations and predictions
-    obs = []
-    pred = []
-    for _, row in df_test.iterrows():
-        obs.append(row['rating'])
-        
-        item_id = row['item_id']-1
-        user_id = row['user_id']-1
-        pred.append(R_p[user_id][item_id])
-
-    # compute evaluation metrics
-    results = {
-        "MAE":mean_absolute_error(obs, pred),
-        "RMSE":np.sqrt(mean_squared_error(obs, pred))
-    }   
     
-    return results
+    def validate(self, P, Q, bU, bI):
+        # predicted rating matrix
+        df_test = self.df_test
+        R_p = P.T.dot(Q) +bU.reshape(-1,1) +bI.reshape(1,-1)
+
+        # get observations and predictions
+        obs = df_test['rating'].values
+        pred = R_p[df_test.values[:,0]-1, df_test.values[:,1]-1]
+
+        # compute evaluation metrics
+        results = {
+            "MAE":mean_absolute_error(obs, pred),
+            "RMSE":np.sqrt(mean_squared_error(obs, pred))
+        }   
+
+        return results
 
 
 # In[ ]:
@@ -166,14 +182,13 @@ def main(fold_id=1):
             
     # learning
     R = ratings.values
-    U, I = SVD_batch(R)
-    #U, I = SVD(R)
+    P, Q, bU, bI = SVD_batch(R, lr=0.3, n_epochs=10000)
     
     # save matrices
-    np.savetxt('others/U.csv', U)
-    np.savetxt('others/I.csv', I)
-    
-    print(validation())
+    np.savetxt('others/P.csv', P)
+    np.savetxt('others/Q.csv', Q)
+    np.savetxt('others/bU.csv', bU)
+    np.savetxt('others/bI.csv', bI)
 
 
 # In[ ]:
