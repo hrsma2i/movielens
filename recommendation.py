@@ -12,6 +12,7 @@ from itertools import product
 from IPython.display import display
 from tqdm import tqdm, trange
 import numpy as np
+from numpy.linalg import inv
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
@@ -119,11 +120,6 @@ def SVD_batch(R, n_epochs=100, K=100, lr=0.005, reg=0.02,
         tqdm.write(' train loss:{}'.format(loss))
         tqdm.write(' val loss:'+str(vld.validate(P, Q, bU, bI)))
         
-        #if pre_loss is not None and pre_loss < loss:
-        #    chance -= 1
-        #    if chance < 0:
-        #        break
-        
         if loss < threshold:
             break
         
@@ -194,6 +190,94 @@ def main(fold_id=1):
 # In[ ]:
 
 
+def mainpp(fold_id=1):
+    # load dataset
+    data_file = './data/u{}.base'.format(fold_id)
+    df_data = pd.read_csv(data_file, delimiter='\t', header=None)
+    df_data.columns = ['user_id', 'item_id', 'rating', 'timestamp']
+    n_users = df_data.max()['user_id']
+    n_items = df_data.max()['item_id']
+
+    # change shape into user-item matrix
+    ratings = df_data.pivot(index='user_id', columns='item_id',
+                            values='rating').fillna(0)
+    # fill the lack of no-rated item_id
+    for item in range(n_items):
+        item += 1
+        if item not in ratings.columns:
+            ratings.loc[:, item] = 0
+            
+    # learning
+    R = ratings.values
+    X, Y = SVDpp(R)
+    
+    # save matrices
+    np.savetxt('others/X.csv', X)
+    np.savetxt('others/Y.csv', Y)
+
+
+# In[ ]:
+
+
+def SVDpp(R, n_epochs=70, f=100, alpha=40, reg=50):
+    # m: the number of users
+    # n: the number of items
+    m, n = R.shape
+    # user factors
+    X = np.random.rand(m, f)
+    # item factors
+    Y = np.random.rand(n, f)
+    # preference
+    P = np.ones(R.shape)
+    P[R==0] = 0
+    # confidence
+    C = 1 + alpha*R
+    
+    for epoch in trange(n_epochs):
+        for u in trange(m):
+            Cu = np.diag(C[u])
+            X[u] = inv(Y.T.dot(Cu).dot(Y)+reg).dot(
+                         Y.T).dot(
+                         Cu).dot(
+                         P[u])
+        else:
+            tqdm.write(str(inv(Y.T.dot(Cu).dot(Y)+reg).shape))
+            tqdm.write(str(Y.T.shape))
+            tqdm.write(str(Cu.shape))
+            tqdm.write(str(P[u].shape))
+            tqdm.write(str(X[u].shape))
+            tqdm.write('')
+
+        for i in trange(n):
+            Ci = np.diag(C[:,i])
+            Y[i] = inv(X.T.dot(Ci).dot(X)+reg).dot(
+                         X.T).dot(
+                         Ci).dot(
+                         P[:,i])
+        R = X.dot(Y.T)
+        tqdm.write(str(pd.Series(R.ravel()).describe()))
+        
+    return X, Y
+
+
+# In[ ]:
+
+
 if __name__=='__main__':
-    main()
+    mainpp()
+
+
+# In[ ]:
+
+
+if __name__=='__main__':
+    test_file = './data/u1.test'
+    df_test = pd.read_csv(test_file, delimiter='\t', header=None)
+    df_test.columns = ['user_id', 'item_id', 'rating', 'timestamp']
+
+    X = np.loadtxt('others/X.csv')
+    Y = np.loadtxt('others/Y.csv')
+    alpha = 40
+    R_p = (X.dot(Y.T) - 1) / alpha
+    print(pd.Series(R_p.ravel()).describe())
 
