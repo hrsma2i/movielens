@@ -240,13 +240,6 @@ def SVDpp(R, n_epochs=70, f=100, alpha=40, reg=50):
                          Y.T).dot(
                          Cu).dot(
                          P[u])
-        else:
-            tqdm.write(str(inv(Y.T.dot(Cu).dot(Y)+reg).shape))
-            tqdm.write(str(Y.T.shape))
-            tqdm.write(str(Cu.shape))
-            tqdm.write(str(P[u].shape))
-            tqdm.write(str(X[u].shape))
-            tqdm.write('')
 
         for i in trange(n):
             Ci = np.diag(C[:,i])
@@ -264,7 +257,7 @@ def SVDpp(R, n_epochs=70, f=100, alpha=40, reg=50):
 
 
 if __name__=='__main__':
-    mainpp()
+    main()
 
 
 # In[ ]:
