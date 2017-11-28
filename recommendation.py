@@ -12,7 +12,7 @@ from itertools import product
 from IPython.display import display
 from tqdm import tqdm, trange
 import numpy as np
-from numpy.linalg import inv
+from numpy.linalg import inv, solve
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
@@ -28,6 +28,7 @@ def rms(arr):
 
 
 def SVD(R, n_epochs=20, K=100, lr=0.05, reg=0.02):
+    
     # U: the number of users
     # I: the number of items
     U, I = R.shape
@@ -113,12 +114,11 @@ def SVD_batch(R, n_epochs=100, K=100, lr=0.005, reg=0.02,
             bU += lr*(Ei.ravel() - reg*bU)
                     
         # compute & print loss
-        E = (R - P.T.dot(Q)
-             -bU.reshape(-1,1) -bI.reshape(1,-1))*mask
-        loss = rms(E)# + reg/2.0*(rms(P)+rms(Q))
+        R_p = P.T.dot(Q) + bU.reshape(-1,1) + bI.reshape(1,-1)
+        loss = np.sqrt(mean_squared_error(R*mask, R_p*mask))
         tqdm.write('epoch {}'.format(epoch))
         tqdm.write(' train loss:{}'.format(loss))
-        tqdm.write(' val loss:'+str(vld.validate(P, Q, bU, bI)))
+        tqdm.write(' val loss:'+str(vld.validate(R_p)))
         
         if loss < threshold:
             break
@@ -131,6 +131,84 @@ def SVD_batch(R, n_epochs=100, K=100, lr=0.005, reg=0.02,
 # In[ ]:
 
 
+def SVD_ALS(R, n_epochs=70, f=1000,  reg=0.1):
+    # m: the number of users
+    # n: the number of items
+    m, n = R.shape
+    # user factors
+    X = np.random.rand(m, f)
+    # item factors
+    Y = np.random.rand(n, f)
+    
+    mask = np.ones(R.shape)
+    mask[R == 0] = 0
+    
+    vld = Validater()
+    
+    for epoch in trange(n_epochs):
+        regI = reg * np.eye(f)
+        
+        YtY = Y.T.dot(Y)
+        for u in trange(m):
+            X[u] = solve((YtY + regI), 
+                        R[u, :].dot(Y))
+
+        XtX = X.T.dot(X)
+        for i in trange(n):
+            Y[i] = solve((XtX + regI), 
+                        R[:, i].dot(X))
+            
+        # compute & print loss
+        R_p = X.dot(Y.T)
+        loss = np.sqrt(mean_squared_error(R[mask==1], R_p[mask==1]))
+        print('sgd')
+        tqdm.write('epoch {}'.format(epoch))
+        tqdm.write(' train loss: {}'.format(loss))
+        tqdm.write('   val loss: '+str(vld.validate(R_p)['RMSE']))
+        
+    return X, Y
+
+
+# In[ ]:
+
+
+def SVDpp(R, n_epochs=70, f=100, alpha=40, reg=50):
+    # m: the number of users
+    # n: the number of items
+    m, n = R.shape
+    # user factors
+    X = np.random.rand(m, f)
+    # item factors
+    Y = np.random.rand(n, f)
+    # preference
+    P = np.ones(R.shape)
+    P[R==0] = 0
+    # confidence
+    C = 1 + alpha*R
+    
+    for epoch in trange(n_epochs):
+        for u in trange(m):
+            Cu = np.diag(C[u])
+            X[u] = inv(Y.T.dot(Cu).dot(Y)+reg).dot(
+                         Y.T).dot(
+                         Cu).dot(
+                         P[u])
+
+        for i in trange(n):
+            Ci = np.diag(C[:,i])
+            Y[i] = inv(X.T.dot(Ci).dot(X)+reg).dot(
+                         X.T).dot(
+                         Ci).dot(
+                         P[:,i])
+        R = X.dot(Y.T)
+        tqdm.write(str(pd.Series(R.ravel()).describe()))
+        
+    return X, Y
+
+
+# In[ ]:
+
+
 class Validater:
 
     # load test data
@@ -138,11 +216,9 @@ class Validater:
     df_test = pd.read_csv(test_file, delimiter='\t', header=None)
     df_test.columns = ['user_id', 'item_id', 'rating', 'timestamp']
     
-    def validate(self, P, Q, bU, bI):
-        # predicted rating matrix
+    def validate(self, R_p):
         df_test = self.df_test
-        R_p = P.T.dot(Q) +bU.reshape(-1,1) +bI.reshape(1,-1)
-
+        
         # get observations and predictions
         obs = df_test['rating'].values
         pred = R_p[df_test.values[:,0]-1, df_test.values[:,1]-1]
@@ -209,7 +285,7 @@ def mainpp(fold_id=1):
             
     # learning
     R = ratings.values
-    X, Y = SVDpp(R)
+    X, Y = SVD_ALS(R)
     
     # save matrices
     np.savetxt('others/X.csv', X)
@@ -219,45 +295,30 @@ def mainpp(fold_id=1):
 # In[ ]:
 
 
-def SVDpp(R, n_epochs=70, f=100, alpha=40, reg=50):
-    # m: the number of users
-    # n: the number of items
-    m, n = R.shape
-    # user factors
-    X = np.random.rand(m, f)
-    # item factors
-    Y = np.random.rand(n, f)
-    # preference
-    P = np.ones(R.shape)
-    P[R==0] = 0
-    # confidence
-    C = 1 + alpha*R
-    
-    for epoch in trange(n_epochs):
-        for u in trange(m):
-            Cu = np.diag(C[u])
-            X[u] = inv(Y.T.dot(Cu).dot(Y)+reg).dot(
-                         Y.T).dot(
-                         Cu).dot(
-                         P[u])
-
-        for i in trange(n):
-            Ci = np.diag(C[:,i])
-            Y[i] = inv(X.T.dot(Ci).dot(X)+reg).dot(
-                         X.T).dot(
-                         Ci).dot(
-                         P[:,i])
-        R = X.dot(Y.T)
-        tqdm.write(str(pd.Series(R.ravel()).describe()))
-        
-    return X, Y
-
-
-# In[ ]:
-
-
 if __name__=='__main__':
-    main()
+    fold_id = 1
+    data_file = './data/u{}.base'.format(fold_id)
+    df_data = pd.read_csv(data_file, delimiter='\t', header=None)
+    df_data.columns = ['user_id', 'item_id', 'rating', 'timestamp']
+    n_users = df_data.max()['user_id']
+    n_items = df_data.max()['item_id']
+
+    # change shape into user-item matrix
+    ratings = df_data.pivot(index='user_id', columns='item_id',
+                            values='rating').fillna(0)
+    # fill the lack of no-rated item_id
+    for item in range(n_items):
+        item += 1
+        if item not in ratings.columns:
+            ratings.loc[:, item] = 0
+            
+    # learning
+    R = ratings.values
+    X, Y = SVD_ALS(R)
+    
+    # save matrices
+    np.savetxt('others/X.csv', X)
+    np.savetxt('others/Y.csv', Y)
 
 
 # In[ ]:
@@ -270,7 +331,6 @@ if __name__=='__main__':
 
     X = np.loadtxt('others/X.csv')
     Y = np.loadtxt('others/Y.csv')
-    alpha = 40
-    R_p = (X.dot(Y.T) - 1) / alpha
+    R_p = X.dot(Y.T)
     print(pd.Series(R_p.ravel()).describe())
 
