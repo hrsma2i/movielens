@@ -8,6 +8,7 @@
 import os
 import argparse
 import codecs
+import json
 
 from tqdm import tqdm, trange
 import joblib
@@ -23,7 +24,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 class MF_base:
     def predict(self, users, items):
-        R_p = self.get_R_p
+        R_p = self.get_R_p()
         pred = R_p[users, items]
         if len(users) == 1:
             return pred[0]
@@ -33,24 +34,20 @@ class MF_base:
         X = self.X
         Y = self.Y
         R_p = X.dot(Y.T)
+        if self.biased:
+            bu = self.bu
+            bi = self.bi
+            b = self.b
+            R_p += b + bu.reshape(-1,1) + bi.reshape(1,-1)
         return R_p
         
     def test(self, df_test):
-        users = df_test['user_id']
-        items = df_test['item_id']
+        users = df_test['user_id'] - 1
+        items = df_test['item_id'] - 1
         obs = df_test['rating']
         pred = self.predict(users, items)
         evaluation = np.sqrt(mean_squared_error(obs, pred))
         return evaluation
-    
-    def get_similarities(self):
-        """
-        Compute similartiteis matrix (m, m), using cosine
-        """
-        Y = self.Y
-        sim = model.Y.dot(Y.T)
-        norms = np.sqrt(np.diagonal(sim)).reshape(-1,1)
-        return sim / norms/ norms.T
     
     def update(self):
         pass
@@ -58,33 +55,52 @@ class MF_base:
     def fit(self, R ,df_val=None, out=None):
         """
         R (array): rating matrix
-        df_test (DataFrame):
+        df_val (DataFrame):
             - columns (user, item rating)
         """
         self.R = R
         
         f = self.f
         n_epochs = self.n_epochs
+        biased = self.biased
         
         m, n = R.shape
+        self.m = m
+        self.n = n
+        if biased:
+            bu = np.zeros(m)
+            bi = np.zeros(n)
+            b = np.mean(R[R!=0])
+            self.bu = bu
+            self.bi = bi
+            self.b  = b
         X = np.random.rand(m, f) # user factors
         Y = np.random.rand(n, f) # item factors
         self.X = X
         self.Y = Y
-
+        
+        logs = []
+        
         for epoch in trange(n_epochs):
             self.update()
                 
             # compute train loss
             R_p = self.get_R_p()
             loss = np.sqrt(mean_squared_error(R[R!=0], R_p[R!=0]))
+            log = {'loss':loss}
             tqdm.write('epoch {:03d}:'.format(epoch))
             tqdm.write('train loss: {}'.format(loss))
             
             # compute validation loss
             if df_val is not None:
                 val_loss = self.test(df_val)
+                log['val_loss'] = val_loss
                 tqdm.write('  val loss: {}'.format(val_loss))
+            
+            # dump log
+            logs.append(log)
+            with open(os.path.join(out,'log'), 'w') as f:
+                json.dump(logs, f, indent=4)
             
         
         # save parameters
@@ -93,6 +109,10 @@ class MF_base:
             'X': X,
             'Y': Y,
         }
+        if biased:
+            params['bu'] = bu
+            params['bi'] = bi
+            params['b']  = b
         self.params = params
         if out is not None:
             if not os.path.exists(out):
@@ -110,7 +130,7 @@ class MF_base:
 # In[ ]:
 
 class SVD_SGD(MF_base):
-    def __init__(self, f=100, n_epochs=20, lr=0.005, reg=0.02, biased=False):
+    def __init__(self, f=100, n_epochs=20, lr=0.001, reg=0.02, biased=False):
         self.f = f
         self.n_epochs = n_epochs
         self.lr = lr
@@ -120,12 +140,22 @@ class SVD_SGD(MF_base):
     def update(self):
         lr = self.lr
         reg = self.reg
+        biased = self.biased
         R = self.R
         X = self.X
         Y = self.Y
+        if biased:
+            bu = self.bu
+            bi = self.bi
+            b = self.b
+        
         r_ui_notzero = zip(*np.where(R!=0))
         for u, i in r_ui_notzero:
             e = R[u,i] - X[u].dot(Y[i].T)
+            if biased:
+                e -= (b + bu[u] + bi[i])
+                bu[u] += lr * (e - reg*bu[u])
+                bi[i] += lr * (e - reg*bi[i])
             X[u] += lr * (e*Y[i] - reg*X[u])
             Y[i] += lr * (e*X[u] - reg*Y[u])
 
@@ -133,28 +163,44 @@ class SVD_SGD(MF_base):
 # In[ ]:
 
 class SVD_ALS(MF_base):
-    def __init__(self, f=100, n_epochs=20, reg=0.02, biased=False):
+    def __init__(self, f=100, n_epochs=20, lr=0.001, reg=0.02, biased=False):
         self.f = f
         self.n_epochs = n_epochs
         self.reg = reg
         self.biased = biased
 
-    def fit(self, R ,df_val=None):
-        """
-        R (array): rating matrix
-        df_test (DataFrame):
-            - columns (user, item rating)
-        """
-        
-        f = self.f
-        n_epochs = self.n_epochs
+    def update(self):
+        lr = self.lr
         reg = self.reg
+        biased = self.biased
+        R = self.R
+        X = self.X
+        Y = self.Y
+        f = self.f
+        m = self.m
+        n = self.n
+        if biased:
+            bu = self.bu
+            bi = self.bi
+            b = self.b
         
-        m, n = R.shape
-        X = np.random.rand(m, f) # user factors
-        Y = np.random.rand(n, f) # item factors
+        if biased:
+            regI = reg * np.eye(f+1)
 
-        for epoch in trange(n_epochs):
+            Y1 = np.concatenate((Y, np.ones(n)), axis=1)
+            Y1tY1 = Yj.T.dot(Y1)
+            for u in trange(m):
+                Xb = solve((Y1tY1 + regI), 
+                            (R[u, :]-bi.reshape(1,-1)).dot(Y1))
+                X[u], bu[u] = Xb[:-1], Xb[-1]
+
+            X1 = np.concatenate((X, np.ones(m)), axis=1)
+            X1tX1 = X1.T.dot(X1)
+            for i in trange(n):
+                Yb = solve((X1tX1 + regI), 
+                            (R[:, i]-bu.reshape(-1,1)).dot(X1))
+                Y[i], bi[i] = Yb[:-1], Yb[-1]
+        else:
             regI = reg * np.eye(f)
 
             YtY = Y.T.dot(Y)
@@ -166,16 +212,6 @@ class SVD_ALS(MF_base):
             for i in trange(n):
                 Y[i] = solve((XtX + regI), 
                             R[:, i].dot(X))
-            
-            R_p = X.dot(Y.T)
-            loss = np.sqrt(mean_squared_error(R[R!=0], R_p[R!=0]))
-            tqdm.write('epoch {:03d}:'.format(epoch))
-            tqdm.write('train loss: {}'.format(loss))
-            
-            self.R_p = R_p
-            if df_val is not None:
-                val_loss = self.test(df_val)
-                tqdm.write('  val loss: {}'.format(val_loss))
 
 
 # In[ ]:
@@ -203,17 +239,31 @@ def recommend_topk(R, u, k=None, mask=None):
 if __name__=='__main__':
     # get parameters from terminal
     parser = argparse.ArgumentParser(description='Matrix Factorization')
-    parser.add_argument('-f', '--fold_id', type=int, default=1,
+    parser.add_argument('-i', '--fold_id', type=int, default=1,
                        help='id of fold to validate')
-    parser.add_argument('-e', '--n_epochs', type=int, default=10,
-                       help='the number of epochs to train')
     parser.add_argument('-o', '--out', type=str, default='results',
                        help='the path where the training results will\
                        be')
+    parser.add_argument('-e', '--n_epochs', type=int, default=200,
+                       help='the number of epochs to train')
+    parser.add_argument('-f', '--n_factor', type=int, default=80,
+                       help='the number of factors')
+    parser.add_argument('-b', '--biased', action='store_true',
+                       help='biased or not')
+    parser.add_argument('-l', '--lr', type=float, default=0.001,
+                       help='learning rate')
+    parser.add_argument('-r', '--reg', type=float, default=0.01,
+                       help='regularization parameter')
+    parser.add_argument('--opt', type=str, default='sgd',
+                       help='optimization method')
     args = parser.parse_args()
     fold_id = args.fold_id
     n_epochs = args.n_epochs
     out = args.out
+    biased = args.biased
+    reg = args.reg
+    lr = args.lr
+    opt = args.opt
     
     # load train data
     data_file = './data/u{}.base'.format(fold_id)
@@ -237,30 +287,13 @@ if __name__=='__main__':
             ratings.loc[:, item] = 0
             
     # learning
-    model = SVD_SGD(n_epochs=n_epochs)
+    print(opt)
+    if opt == 'sgd':
+        model = SVD_SGD(n_epochs=n_epochs, biased=biased,
+                       lr=lr, reg=reg)
+    elif opt == 'als':
+        model = SVD_ALS(n_epochs=n_epochs, biased=biased,
+                       lr=lr, reg=reg)
     R = ratings.values
     model.fit(R, df_val, out=out)
-
-
-# In[ ]:
-
-model = SVD_SGD()
-model.load_params('results/test/parameters.pkl')
-
-#recommend_topk(R=model.get_R_p(), u=0)
-user = 0
-rated = recommend_topk(R=model.R, u=user, k=10)
-mask_unrated = (model.R[user]==0)
-unrated = recommend_topk(R=model.get_R_p(), u=user, k=10, mask=mask_unrated)
-rated
-
-
-# In[ ]:
-
-unrated
-
-
-# In[ ]:
-
-
 
