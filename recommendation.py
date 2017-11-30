@@ -180,6 +180,26 @@ class SVD_ALS(MF_base):
 
 # In[ ]:
 
+def recommend_topk(R, u, k=None, mask=None):
+    with codecs.open('data/u.item', 'r', 'utf-8', 'ignore') as f:
+        df_items = pd.read_csv(f, delimiter='|', header=None)
+    
+    rec = pd.DataFrame({
+        'rating':R[u],
+        'title':df_items[1],
+    })
+    
+    if mask is None:
+        mask = (R[u]!=0)
+    rec = rec[mask]
+    
+    rec = rec.sort_values('rating', ascending=False)
+    
+    return rec[:k]
+
+
+# In[ ]:
+
 if __name__=='__main__':
     # get parameters from terminal
     parser = argparse.ArgumentParser(description='Matrix Factorization')
@@ -220,26 +240,6 @@ if __name__=='__main__':
     model = SVD_SGD(n_epochs=n_epochs)
     R = ratings.values
     model.fit(R, df_val, out=out)
-
-
-# In[ ]:
-
-def recommend_topk(R, u, k=None, mask=None):
-    with codecs.open('data/u.item', 'r', 'utf-8', 'ignore') as f:
-        df_items = pd.read_csv(f, delimiter='|', header=None)
-    
-    rec = pd.DataFrame({
-        'rating':R[u],
-        'title':df_items[1],
-    })
-    
-    if mask is None:
-        mask = (R[u]!=0)
-    rec = rec[mask]
-    
-    rec = rec.sort_values('rating', ascending=False)
-    
-    return rec[:k]
 
 
 # In[ ]:
