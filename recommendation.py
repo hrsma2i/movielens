@@ -80,6 +80,8 @@ class MF_base:
         self.Y = Y
         
         logs = []
+        if not os.path.exists(out):
+            os.makedirs(out)
         
         for epoch in trange(n_epochs):
             self.update()
@@ -114,12 +116,9 @@ class MF_base:
             params['bi'] = bi
             params['b']  = b
         self.params = params
-        if out is not None:
-            if not os.path.exists(out):
-                os.makedirs(out)
             
-            params_file = os.path.join(out, 'parameters.pkl')
-            joblib.dump(params, params_file, compress=True)
+        params_file = os.path.join(out, 'parameters.pkl')
+        joblib.dump(params, params_file, compress=True)
             
     def load_params(self, params_file):
         params = joblib.load(params_file)
@@ -170,7 +169,6 @@ class SVD_ALS(MF_base):
         self.biased = biased
 
     def update(self):
-        lr = self.lr
         reg = self.reg
         biased = self.biased
         R = self.R
@@ -187,18 +185,18 @@ class SVD_ALS(MF_base):
         if biased:
             regI = reg * np.eye(f+1)
 
-            Y1 = np.concatenate((Y, np.ones(n)), axis=1)
-            Y1tY1 = Yj.T.dot(Y1)
+            Y1 = np.concatenate((Y, np.ones((n,1))), axis=1)
+            Y1tY1 = Y1.T.dot(Y1)
             for u in trange(m):
                 Xb = solve((Y1tY1 + regI), 
-                            (R[u, :]-bi.reshape(1,-1)).dot(Y1))
+                            (R[u, :]-bi-b).dot(Y1))
                 X[u], bu[u] = Xb[:-1], Xb[-1]
 
-            X1 = np.concatenate((X, np.ones(m)), axis=1)
+            X1 = np.concatenate((X, np.ones((m,1))), axis=1)
             X1tX1 = X1.T.dot(X1)
             for i in trange(n):
                 Yb = solve((X1tX1 + regI), 
-                            (R[:, i]-bu.reshape(-1,1)).dot(X1))
+                            (R[:, i]-bu-b).dot(X1))
                 Y[i], bi[i] = Yb[:-1], Yb[-1]
         else:
             regI = reg * np.eye(f)
