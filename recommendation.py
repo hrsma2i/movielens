@@ -188,6 +188,16 @@ class MF_base:
 # In[ ]:
 
 class SVD_SGD(MF_base):
+    """
+    SVD conducted with SGD
+    
+    # Param
+    - f (int): the dimension of latent factor
+    - n_epochs (int): the number of epochs upto which training
+    - lr (float): learning rate
+    - reg (float): regularization parameter (larger is more regularised)
+    - biased (bool): if this is True, biases are set
+    """
     def __init__(self, f=100, n_epochs=20, lr=0.001, reg=0.02, biased=False):
         self.f = f
         self.n_epochs = n_epochs
@@ -196,24 +206,31 @@ class SVD_SGD(MF_base):
         self.biased = biased
 
     def update(self):
+        """
+        update of SGD at each epoch
+        """
         lr = self.lr
         reg = self.reg
         biased = self.biased
-        R = self.R
-        X = self.X
-        Y = self.Y
+        R = self.R # rating matrix
+        X = self.X # user latent factors
+        Y = self.Y # item latent factors
         if biased:
             bu = self.bu
             bi = self.bi
             b = self.b
         
+        # iterator over pairs (u, i) whose rating exists
         r_ui_notzero = zip(*np.where(R!=0))
         for u, i in r_ui_notzero:
+            # e: prediction error
             e = R[u,i] - X[u].dot(Y[i].T)
             if biased:
                 e -= (b + bu[u] + bi[i])
+                # update biases
                 bu[u] += lr * (e - reg*bu[u])
                 bi[i] += lr * (e - reg*bi[i])
+            # update latent factors
             X[u] += lr * (e*Y[i] - reg*X[u])
             Y[i] += lr * (e*X[u] - reg*Y[u])
 
@@ -221,6 +238,15 @@ class SVD_SGD(MF_base):
 # In[ ]:
 
 class SVD_ALS(MF_base):
+    """
+    SVD conducted with ALS
+
+    # Param
+    - f (int): the dimension of latent factor
+    - n_epochs (int): the number of epochs upto which training
+    - reg (float): regularization parameter (larger is more regularised)
+    - biased (bool): if this is True, biases are set
+    """
     def __init__(self, f=100, n_epochs=20, lr=0.001, reg=0.02, biased=False):
         self.f = f
         self.n_epochs = n_epochs
@@ -228,14 +254,17 @@ class SVD_ALS(MF_base):
         self.biased = biased
 
     def update(self):
+        """
+        update of ALS at each epoch
+        """
         reg = self.reg
         biased = self.biased
-        R = self.R
-        X = self.X
-        Y = self.Y
-        f = self.f
-        m = self.m
-        n = self.n
+        R = self.R # rating matrix
+        X = self.X # user latent factors
+        Y = self.Y # item latent factors
+        f = self.f # the dim of latent factor
+        m = self.m # the num of users
+        n = self.n # the num of items
         if biased:
             bu = self.bu
             bi = self.bi
@@ -260,11 +289,15 @@ class SVD_ALS(MF_base):
         else:
             regI = reg * np.eye(f)
 
+            # get the local optimal solution of each user factor X[u]
+            # precompute for computational efficiency
             YtY = Y.T.dot(Y)
             for u in trange(m):
                 X[u] = solve((YtY + regI), 
                             R[u, :].dot(Y))
 
+            # get the local optimal solution of each item factor Y[i]
+            # precompute for computational efficiency
             XtX = X.T.dot(X)
             for i in trange(n):
                 Y[i] = solve((XtX + regI), 
@@ -274,18 +307,40 @@ class SVD_ALS(MF_base):
 # In[ ]:
 
 def recommend_topk(R, u, k=None, mask=None):
+    """
+    Recommend top-k items for user u
+    
+    # Params
+    - R (array: (m, n)): rating matrix
+        - m: the number of users
+        - n: the number of items
+    - u (int): the index of the user for who to recommend items
+    - k (int): the number of items which to recommned
+    - mask (array: dtype=bool, shape=(m,n)):
+        - An array which decides which ratings to use 
+            for recommendation. 
+        - If this is None, this uses only rated element in R. I
+        - If you want to use predicted rating matrix R_p,
+            you have to give this func, a mask R==0 (unrated element).
+    """
+    
+    # to ignore encoding errors
     with codecs.open('data/u.item', 'r', 'utf-8', 'ignore') as f:
         df_items = pd.read_csv(f, delimiter='|', header=None)
     
+    # recommendation dataframe
     rec = pd.DataFrame({
         'rating':R[u],
         'title':df_items[1],
     })
     
+    # filter items not needed to recommend
     if mask is None:
+        # use only rated element in R
         mask = (R[u]!=0)
     rec = rec[mask]
     
+    # sort items by rating in descending order
     rec = rec.sort_values('rating', ascending=False)
     
     return rec[:k]
@@ -294,7 +349,7 @@ def recommend_topk(R, u, k=None, mask=None):
 # In[ ]:
 
 if __name__=='__main__':
-    # get parameters from terminal
+    # get parameters from the terminal
     parser = argparse.ArgumentParser(description='Matrix Factorization')
     parser.add_argument('-i', '--fold_id', type=int, default=1,
                        help='id of fold to validate')
