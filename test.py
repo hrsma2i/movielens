@@ -5,6 +5,9 @@
 
 # In[ ]:
 
+"""
+test recommend_topk and show learning curves
+"""
 import pandas as pd
 import matplotlib.pyplot as plt
 get_ipython().run_line_magic('matplotlib', 'inline')
@@ -34,6 +37,7 @@ mask_unrated = (model.R[user]==0)
 rec = recommend_topk(R=model.get_R_p(), u=user, k=k, mask=mask_unrated)
 display(rec)
 
+# show learning curve
 log_json = 'results/sgd/log'
 df_log = pd.read_json(log_json)
 for name, col in df_log.iteritems():
@@ -43,15 +47,17 @@ plt.legend()
 
 # In[ ]:
 
-# recommend top-k unrated items
+# set up model
 model = SVD_SGD(biased=True)
 model_name = 'sgd_b'
 
+# recommend top-k unrated items
 model.load_params('results/{}/parameters.pkl'.format(model_name))
 mask_unrated = (model.R[user]==0)
 rec = recommend_topk(R=model.get_R_p(), u=user, k=k, mask=mask_unrated)
 display(rec)
 
+# show learning curve
 log_json = 'results/{}/log'.format(model_name)
 df_log = pd.read_json(log_json)
 for name, col in df_log.iteritems():
@@ -61,15 +67,17 @@ plt.legend()
 
 # In[ ]:
 
-# recommend top-k unrated items
+# set up model
 model = SVD_ALS()
 model_name = 'als'
 
+# recommend top-k unrated items
 model.load_params('results/{}/parameters.pkl'.format(model_name))
 mask_unrated = (model.R[user]==0)
 rec = recommend_topk(R=model.get_R_p(), u=user, k=k, mask=mask_unrated)
 display(rec)
 
+# show learning curve
 log_json = 'results/{}/log'.format(model_name)
 df_log = pd.read_json(log_json)
 for name, col in df_log.iteritems():
@@ -79,15 +87,17 @@ plt.legend()
 
 # In[ ]:
 
-# recommend top-k unrated items
+# set up model
 model = SVD_ALS(biased=True)
 model_name = 'als_b'
 
+# recommend top-k unrated items
 model.load_params('results/{}/parameters.pkl'.format(model_name))
 mask_unrated = (model.R[user]==0)
 rec = recommend_topk(R=model.get_R_p(), u=user, k=k, mask=mask_unrated)
 display(rec)
 
+# show learning curve
 log_json = 'results/{}/log'.format(model_name)
 df_log = pd.read_json(log_json)
 for name, col in df_log.iteritems():

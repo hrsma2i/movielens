@@ -5,6 +5,11 @@
 
 # In[ ]:
 
+"""
+- Matrix Factrization using SGD and ALS
+- recommend top k movies from predicted rating matrix
+"""
+
 import os
 import argparse
 import codecs
@@ -23,7 +28,21 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 # In[ ]:
 
 class MF_base:
+    """
+    Abstract class for SVD_SGD and SVD_ALS
+    """
     def predict(self, users, items):
+        """
+        Predict some ratings
+        
+        # Params
+        - users (array-like: (N,))
+        - items (array-like: (N,))
+        N: the number of elements
+        
+        # Return
+        - pred (array: (N,)): has ratings r_ui
+        """
         R_p = self.get_R_p()
         pred = R_p[users, items]
         if len(users) == 1:
@@ -31,6 +50,15 @@ class MF_base:
         return pred
     
     def get_R_p(self):
+        """
+        Compute predicted rating matrix 
+        from latent factor X,Y (and biases)
+        
+        # Return
+        - R_p (array: (m, n)): predicted rating matrix
+        m: the number of users
+        n: the number of items
+        """
         X = self.X
         Y = self.Y
         R_p = X.dot(Y.T)
@@ -42,6 +70,19 @@ class MF_base:
         return R_p
         
     def test(self, df_test):
+        """
+        Evaluate the predicted rating matrix,
+        using test dataset. Evaluation metric is RMSE.
+        
+        # Params
+        - df_test (pd.DataFrame):
+            - col: (user_id, item_id, rating)
+        
+        # Return
+        - R_p (array: (m, n)): predicted rating matrix
+        m: the number of users
+        n: the number of items
+        """
         users = df_test['user_id'] - 1
         items = df_test['item_id'] - 1
         obs = df_test['rating']
@@ -50,13 +91,21 @@ class MF_base:
         return evaluation
     
     def update(self):
+        """
+        Update of parameters repeated in self.fit
+        """
         pass
         
     def fit(self, R ,df_val=None, out=None):
         """
-        R (array): rating matrix
-        df_val (DataFrame):
-            - columns (user, item rating)
+        - R (array: (m, n)): rating matrix to train
+            - m: the number of users
+            - n: the number of items
+        - df_val (DataFrame):
+            - col: (user_id, item_id rating)
+            - if this is None, no validation
+        - out (str): the path where learning resutls and logs
+            will be saved
         """
         self.R = R
         
@@ -67,6 +116,8 @@ class MF_base:
         m, n = R.shape
         self.m = m
         self.n = n
+        
+        # initialize paramters
         if biased:
             bu = np.zeros(m)
             bi = np.zeros(n)
@@ -79,11 +130,14 @@ class MF_base:
         self.X = X
         self.Y = Y
         
+        # make directories designated by "out"
         logs = []
         if not os.path.exists(out):
             os.makedirs(out)
         
+        # training
         for epoch in trange(n_epochs):
+            # update parameters
             self.update()
                 
             # compute train loss
@@ -116,12 +170,17 @@ class MF_base:
             params['bi'] = bi
             params['b']  = b
         self.params = params
-            
         params_file = os.path.join(out, 'parameters.pkl')
         joblib.dump(params, params_file, compress=True)
             
     def load_params(self, params_file):
-        params = joblib.load(params_file)
+        """
+        Load learned parameters from pkl file as self attributes.
+        
+        # Params
+        - params_file (str): the path where pkl file are
+        """
+        params = joblib.load(params_file) # dict
         for k, v in params.items():
             exec('self.{} = v'.format(k))
 
